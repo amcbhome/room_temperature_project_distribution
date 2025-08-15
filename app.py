@@ -1,49 +1,89 @@
 import streamlit as st
+import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import norm
+import time
+from datetime import datetime
 
-st.set_page_config(page_title="Normal Distribution Empirical Rule", layout="centered")
+st.set_page_config(page_title="IoT Normal Distribution Analyzer", layout="wide")
 
-st.title("Normal Distribution with Empirical Rule")
+# Initialize session state
+if "data" not in st.session_state:
+    st.session_state.data = pd.DataFrame(columns=["timestamp", "temperature"])
+if "running" not in st.session_state:
+    st.session_state.running = False
 
-# Sidebar controls
-mean = st.sidebar.number_input("Mean (μ)", value=0.0, step=0.1)
-std_dev = st.sidebar.number_input("Standard Deviation (σ)", value=1.0, step=0.1, min_value=0.1)
+# Function to simulate one temperature reading
+def generate_temperature():
+    base_temp = 22  # average room temperature
+    variation = np.random.normal(0, 0.5)  # noise
+    return round(base_temp + variation, 2)
 
-# Generate curve data
-x = np.linspace(mean - 4*std_dev, mean + 4*std_dev, 1000)
-y = norm.pdf(x, mean, std_dev)
+st.title("IoT Temperature Distribution with Empirical Rule")
 
-# Create figure
-fig, ax = plt.subplots(figsize=(10,6))
-ax.plot(x, y, color='black', linewidth=2)
+# Controls
+col1, col2 = st.columns(2)
+if col1.button("Start Simulation"):
+    st.session_state.running = True
+if col2.button("Stop Simulation"):
+    st.session_state.running = False
 
-# Shade 68% region (μ ± 1σ)
-x_fill = np.linspace(mean - std_dev, mean + std_dev, 500)
-ax.fill_between(x_fill, norm.pdf(x_fill, mean, std_dev), alpha=0.3, color='skyblue', label='68% of data')
+# Live update loop
+if st.session_state.running:
+    new_row = {
+        "timestamp": datetime.now(),
+        "temperature": generate_temperature()
+    }
+    st.session_state.data = pd.concat(
+        [st.session_state.data, pd.DataFrame([new_row])],
+        ignore_index=True
+    )
+    time.sleep(1)
+    st.rerun()
 
-# Shade 95% region (μ ± 2σ)
-x_fill = np.linspace(mean - 2*std_dev, mean + 2*std_dev, 500)
-ax.fill_between(x_fill, norm.pdf(x_fill, mean, std_dev), alpha=0.3, color='lightgreen', label='95% of data')
+# Show latest reading
+if not st.session_state.data.empty:
+    latest_temp = st.session_state.data.iloc[-1]
+    st.metric("Latest Temperature (°C)", latest_temp["temperature"])
 
-# Shade 99.7% region (μ ± 3σ)
-x_fill = np.linspace(mean - 3*std_dev, mean + 3*std_dev, 500)
-ax.fill_between(x_fill, norm.pdf(x_fill, mean, std_dev), alpha=0.3, color='lightcoral', label='99.7% of data')
+# Mean and std dev from actual data
+if len(st.session_state.data) >= 2:
+    mean = st.session_state.data["temperature"].mean()
+    std_dev = st.session_state.data["temperature"].std()
 
-# Lines for mean and ±σ
-ax.axvline(mean, color='black', linestyle='--', label='Mean')
-for i in range(1, 4):
-    ax.axvline(mean - i*std_dev, color='gray', linestyle='--')
-    ax.axvline(mean + i*std_dev, color='gray', linestyle='--')
+    # Prepare normal curve
+    x = np.linspace(mean - 4*std_dev, mean + 4*std_dev, 1000)
+    y = norm.pdf(x, mean, std_dev)
 
-# Labels
-ax.set_title("Normal Distribution with Empirical Rule", fontsize=16)
-ax.set_xlabel("Value")
-ax.set_ylabel("Probability Density")
-ax.legend()
-ax.grid(True)
+    # Plot
+    fig, ax = plt.subplots(figsize=(10,6))
+    ax.plot(x, y, color='black', linewidth=2, label='Normal Distribution')
 
-# Display in Streamlit
-st.pyplot(fig)
+    # Shade 95% empirical rule region
+    lower_bound = mean - 2*std_dev
+    upper_bound = mean + 2*std_dev
+    x_fill = np.linspace(lower_bound, upper_bound, 500)
+    ax.fill_between(x_fill, norm.pdf(x_fill, mean, std_dev), alpha=0.3, color='lightgreen', label='95% range')
 
+    # Plot actual data points on curve
+    temps = st.session_state.data["temperature"].values
+    y_points = norm.pdf(temps, mean, std_dev)
+    ax.scatter(temps, y_points, color='red', zorder=5, label='Data points')
+
+    # Labels
+    ax.set_title("IoT Temperature Distribution", fontsize=16)
+    ax.set_xlabel("Temperature (°C)")
+    ax.set_ylabel("Probability Density")
+    ax.legend()
+    ax.grid(True)
+
+    st.pyplot(fig)
+
+# Show table of last readings
+st.dataframe(st.session_state.data.tail(20))
+
+# Download option
+if not st.session_state.data.empty:
+    csv = st.session_state.data.to_csv(index=False)
+    st.download_button("Download Data as CSV", data=csv, file_name="temperature_data.csv", mime="text/csv")
